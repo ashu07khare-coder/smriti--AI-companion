@@ -4,13 +4,27 @@ const clientCache = new Map<string, GoogleGenAI>();
 
 export function getAllGeminiKeys(): string[] {
   const keys: string[] = [];
+
+  // Check specific keys in priority order
   const rawList = [
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
     process.env.GEMINI_API_KEYS,
     process.env.VITE_GEMINI_API_KEY,
     process.env.VITE_GEMINI_API_KEY_2,
+    process.env.VITE_GEMINI_API_KEY_3,
   ];
+
+  // Also include any GEMINI_API_KEY_* defined in process.env
+  for (const envKey of Object.keys(process.env)) {
+    if (envKey.startsWith('GEMINI_API_KEY') || envKey.startsWith('VITE_GEMINI_API_KEY')) {
+      const val = process.env[envKey];
+      if (val && !rawList.includes(val)) {
+        rawList.push(val);
+      }
+    }
+  }
 
   for (const item of rawList) {
     if (!item) continue;
