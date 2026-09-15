@@ -577,14 +577,23 @@ apiRouter.get('/ai/languages', (req: Request, res: Response) => {
 });
 
 apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
-  const { message, languageCode = 'as', patientId = 'patient-aita-001', elderName = 'Aita', context = {} } = req.body;
+  const {
+    message,
+    languageCode = 'as',
+    patientId = 'patient-aita-001',
+    elderName = 'Aita',
+    context = {},
+    history = [],
+    apiKey,
+  } = req.body;
 
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'A user message is required' });
   }
 
   const bhashiniProfile = getBhashiniProfile(languageCode);
-  const ai = getGemini();
+  const explicitKey = (apiKey as string) || (req.headers['x-gemini-api-key'] as string);
+  const ai = getGemini(explicitKey);
 
   // Find user / patient info
   const user = db.users.find(u => u.id === patientId);
@@ -613,16 +622,33 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
     timeOfDay: currentTimeStr,
   });
 
+  // Prepare multi-turn history for Gemini
+  const recentHistory = Array.isArray(history)
+    ? history.slice(-6).map((h: any) => ({
+        role: h.sender === 'patient' || h.role === 'user' ? 'user' : 'model',
+        parts: [{ text: String(h.text || h.content || '') }],
+      })).filter(h => h.parts[0].text.trim().length > 0)
+    : [];
+
+  const contents = [
+    ...recentHistory,
+    {
+      role: 'user',
+      parts: [{ text: message }],
+    },
+  ];
+
   if (ai) {
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+    // Official Google GenAI models
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'];
     for (const modelName of modelsToTry) {
       try {
         const response = await ai.models.generateContent({
           model: modelName,
-          contents: message,
+          contents: contents as any,
           config: {
             systemInstruction,
-            temperature: 0.7,
+            temperature: 0.85,
           },
         });
 
@@ -642,49 +668,155 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
           });
         }
       } catch (err: any) {
-        console.warn(`[Gemini + Bhashini] ${modelName} call failed, trying next:`, err?.message || err);
+        console.warn(`[Gemini + Bhashini] ${modelName} call error:`, err?.message || err);
       }
     }
   }
 
-  // Graceful conversational fallback with culturally grounded local language response
+  // Diverse, natural local grounding response generator
   const q = message.toLowerCase().trim();
-  const isTimeQuery = q.includes('time') || q.includes('clock') || q.includes('hour') || q.includes('समय') || q.includes('बजे') || q.includes('কিমান বাজি');
-  const isDateQuery = q.includes('day') || q.includes('date') || q.includes('today') || q.includes('दिन') || q.includes('তাতীখ') || q.includes('বাৰ');
+  const today = new Date();
+  const fullDate = today.toLocaleDateString(languageCode === 'hi' ? 'hi-IN' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const hour = today.getHours();
+  const timeGreeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
 
   let reply = '';
+
+  // 1. Exact Time Inquiries
+  const isTimeQuery =
+    q.includes('what time') ||
+    q.includes("what's the time") ||
+    q.includes('tell me the time') ||
+    q.includes('current time') ||
+    q.includes('time kya') ||
+    q.includes('kitne baje') ||
+    q.includes('समय क्या') ||
+    q.includes('कितने बजे') ||
+    q.includes('কিমান বাজি') ||
+    q.includes('সময় কিমান');
+
+  // 2. Exact Date / Day Inquiries
+  const isDateQuery =
+    q.includes('what day') ||
+    q.includes('which day') ||
+    q.includes('what date') ||
+    q.includes('which date') ||
+    q.includes("what's today's date") ||
+    q.includes('today date') ||
+    q.includes('aaj kaun sa din') ||
+    q.includes('aaj kya din') ||
+    q.includes('aaj ki tarikh') ||
+    q.includes('दिन कौन सा') ||
+    q.includes('तारीख क्या') ||
+    q.includes('आज क्या दिन') ||
+    q.includes('কি বাৰ') ||
+    q.includes('কি তাৰিখ') ||
+    q.includes('আজি কি বাৰ');
+
+  // 1. Time / Clock queries
   if (isTimeQuery) {
     if (languageCode === 'hi') {
-      reply = `अभी समय ${currentTimeStr} हो रहा है, ${effectiveName} जी। सब कुछ बहुत शांत और सुरक्षित है।`;
+      const timeReplies = [
+        `अभी समय ${currentTimeStr} हो रहा है, ${effectiveName} जी। सब कुछ बहुत शांत, सुरक्षित और अपने सही समय पर है।`,
+        `घड़ी में अभी ठीक ${currentTimeStr} बज रहे हैं। आप आराम से बैठिए, सब बहुत व्यवस्थित है।`,
+        `इस समय ${currentTimeStr} हो रहे हैं, ${effectiveName} जी। आपके सारे काम समय के अनुसार चल रहे हैं।`,
+      ];
+      reply = timeReplies[Math.floor(Math.random() * timeReplies.length)];
     } else if (languageCode === 'as') {
-      reply = `এতিয়া সময় হৈছে ${currentTimeStr}। আপোনাৰ সকলো কাম সময়মতেই চলি আছে, ${effectiveName}।`;
+      const timeReplies = [
+        `এতিয়া সময় হৈছে ${currentTimeStr}। আপোনাৰ সকলো কাম সুন্দৰভাৱে চলি আছে, ${effectiveName}।`,
+        `ঘড়ীত এতিয়া ঠিক ${currentTimeStr} বাজিছে। আপোনাৰ ঘৰখন অতি শান্ত আৰু নিৰাপদ।`,
+      ];
+      reply = timeReplies[Math.floor(Math.random() * timeReplies.length)];
     } else {
       reply = `It is currently ${currentTimeStr}, ${effectiveName}. Everything is calm, safe, and right on schedule.`;
     }
-  } else if (isDateQuery) {
-    const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  }
+  // 2. Date / Day queries
+  else if (isDateQuery) {
     if (languageCode === 'hi') {
-      reply = `आज ${todayStr} है, ${effectiveName} जी। आप बिल्कुल सुरक्षित अपने घर में हैं।`;
+      reply = `आज ${fullDate} है, ${effectiveName} जी। आज का दिन बहुत प्यारा और सुखद है। आप अपने प्यारे घर में बिल्कुल सुरक्षित हैं।`;
     } else if (languageCode === 'as') {
-      reply = `আজি ${todayStr}। আপোনাৰ ঘৰখন অতি শান্ত আৰু নিৰাপদ, ${effectiveName}।`;
+      reply = `আজি ${fullDate}। বতৰটো অতি শান্ত আৰু আপোনাৰ ঘৰখন নিৰাপদ আৰু মৰমেৰে ভৰা, ${effectiveName}।`;
     } else {
-      reply = `Today is ${todayStr}, ${effectiveName}. You are safe at home and everything is well taken care of.`;
+      reply = `Today is ${fullDate}, ${effectiveName}. It is a bright, peaceful day and you are completely safe at home.`;
     }
-  } else {
-    const fallbackReplies: Record<string, string> = {
-      as: `মই আপোনাৰ কথা অতি মৰমেৰে বুজি পাইছোঁ, ${effectiveName}। মই সদায় আপোনাৰ কাষতে আছোঁ। আপুনি আপোনাৰ ঘৰত সম্পূর্ণ নিৰাপদ আৰু সকলো ভালে আছে।`,
-      brx: `आं नोंथांनि रावखौ बुजिदों, ${effectiveName}। आं नोंथांनि लोगोआवनो दं। नोंथाङा गावनि नख’राव गाहाम दं।`,
-      mni: `ঐহাক্না অদোমগী ৱাফম খঙলে, ${effectiveName}। ঐহাক মতম পুম্বদা অদোমগা লোয়ননা লৈরি। অদোম অপাম্বদা লৈরি।`,
-      lus: `I thu sawi ka hria e, ${effectiveName}. I kiangah ka awm reng a nia. Hahdam deuh khan awm rawh aw.`,
-      kha: `Nga sngewthuh ia phi, ${effectiveName}. Nga don ryngkat bad phi barabor. Phi long kaba shngain ha la iing.`,
-      grt: `Anga nang·ni aganako kni·a, ${effectiveName}. Anga nang· baksa donga. Nang· nokode kema nama donga.`,
-      trp: `Ang nini kok khnaui tong, ${effectiveName}. Ang nini logote tong. Nini nogo nwng bwrwi thungba kaham tong.`,
-      nag: `Moi apuni kotha buji pailo, ${effectiveName}. Moi apuni lagot asey. Kiba chinta nakoribo, sob bhal asey.`,
-      ne: `मैले हजुरको कुरा बुझें, ${effectiveName} हजुर। म सधैं हजुरको साथमा छु। हजुर आफ्नै घरमा सुरक्षित हुनुहुन्छ।`,
-      hi: `मैं आपकी बात समझ रही हूँ, ${effectiveName} जी। मैं हर पल आपके साथ हूँ। आप अपने घर में सुरक्षित हैं और सब बहुत अच्छा चल रहा है।`,
-      en: `I hear you warmly, ${effectiveName}. I am right here by your side. You are completely safe at home, and everything is taken care of.`,
+  }
+  // 3. Medicine queries
+  else if (q.includes('medicine') || q.includes('pill') || q.includes('दवाई') || q.includes('दवा') || q.includes('औषध') || q.includes('ঔষধ')) {
+    const nextMed = reminders.find(r => !r.completed && r.category === 'medicine');
+    if (nextMed) {
+      if (languageCode === 'hi') {
+        reply = `आपकी अगली दवाई का समय ${nextMed.scheduledTime} पर है (${nextMed.title})। जब समय होगा, मैं आपको प्यार से याद दिला दूँगी। आप बिल्कुल निश्चिंत रहिए।`;
+      } else if (languageCode === 'as') {
+        reply = `আপোনাৰ ঔষধৰ সময় ${nextMed.scheduledTime} বজাত (${nextMed.title})। সময় হলে মই নিজে মৰমেৰে সোঁৱৰাই দিম, ${effectiveName}।`;
+      } else {
+        reply = `Your next scheduled medicine is at ${nextMed.scheduledTime} (${nextMed.title}). I will gently remind you when it's time, ${effectiveName}.`;
+      }
+    } else {
+      if (languageCode === 'hi') {
+        reply = `आपकी आज की सभी आवश्यक दवाइयों की देखभाल व्यवस्थित है, ${effectiveName} जी। आपका परिवार पूरी तरह ध्यान रख रहा है।`;
+      } else if (languageCode === 'as') {
+        reply = `আপোনাৰ আজিৰ ঔষধৰ সকলো ব্যৱস্থা সঠিক হৈ আছে, ${effectiveName}। কোনো চিন্তা কৰিব নালাগে।`;
+      } else {
+        reply = `All your scheduled medicines are in order, ${effectiveName}. Everything is well organized.`;
+      }
+    }
+  }
+  // 4. Family / Loved ones queries
+  else if (q.includes('family') || q.includes('son') || q.includes('daughter') || q.includes('rahul') || q.includes('ananya') || q.includes('परिवार') || q.includes('পৰিয়াল') || q.includes('बेटा') || q.includes('बेटी')) {
+    const fNames = familySummary || 'राहुल, अनन्य और पूरा परिवार';
+    if (languageCode === 'hi') {
+      reply = `आपके परिवार में ${fNames} आपसे बहुत गहरा प्यार करते हैं, ${effectiveName} जी। वे हमेशा आपकी सलामती और खुशी के लिए सोचते हैं।`;
+    } else if (languageCode === 'as') {
+      reply = `আপোনাৰ পৰিয়ালৰ সকলোৱে আপোনাক হৃদয়ভৰি মৰম কৰে, ${effectiveName}। তেওঁলোকে সঘনাই আপোনাৰ যত্ন লৈ থাকে।`;
+    } else {
+      reply = `Your family loves you very much, ${effectiveName}. They are always thinking of you and checking in.`;
+    }
+  }
+  // 5. Feelings / Loneliness / Anxiousness
+  else if (q.includes('lonely') || q.includes('sad') || q.includes('alone') || q.includes('afraid') || q.includes('डर') || q.includes('उदास') || q.includes('अकेला') || q.includes('ভয়') || q.includes('মন বেয়া') || q.includes('অকলে')) {
+    if (languageCode === 'hi') {
+      reply = `आप बिल्कुल अकेले नहीं हैं, ${effectiveName} जी। मैं हर पल आपके साथ बैठी हूँ, और आपके चाहने वाले हमेशा आपके दिल के पास हैं। एक गहरी शांत सांस लीजिए, सब बहुत अच्छा है।`;
+    } else if (languageCode === 'as') {
+      reply = `আপুনি অকলে নাই, ${effectiveName}। মই সদায় আপোনাৰ লগত আছোঁ। আপোনাৰ ঘৰখন সুৰক্ষিত আৰু মৰমেৰে ভৰি আছে। মনটো শান্ত কৰক।`;
+    } else {
+      reply = `You are never alone, ${effectiveName}. I am right here with you, and your loved ones cherish you dearly. Take a gentle breath, you are safe and warm.`;
+    }
+  }
+  // 6. Food / Tea / Hydration
+  else if (q.includes('tea') || q.includes('chai') || q.includes('food') || q.includes('eat') || q.includes('চা') || q.includes('ভাত') || q.includes('चाय') || q.includes('खाना') || q.includes('भूख')) {
+    if (languageCode === 'hi') {
+      reply = `एक कप गरम ताज़ा चाय या हल्का नाश्ता आपके मन को बहुत सुकून देगा, ${effectiveName} जी। थोड़ा गुनगुना पानी भी ज़रूर पीजिएगा।`;
+    } else if (languageCode === 'as') {
+      reply = `একাচাহ গৰম সুগন্ধি চাহ খালে মনটো বৰ ভাল লাগিব, ${effectiveName}। লগত অকণমান পানীও খাই লওক।`;
+    } else {
+      reply = `A warm, fresh cup of tea or a light meal sounds wonderful, ${effectiveName}. Make sure to take a few gentle sips of water too.`;
+    }
+  }
+  // 7. General Conversational Variety
+  else {
+    const conversationalTemplates: Record<string, string[]> = {
+      hi: [
+        `नमस्ते ${effectiveName} जी! आपकी आवाज़ सुनकर बहुत खुशी हुई। सब कुछ बहुत सुखद चल रहा है। क्या आप किसी खास बात के बारे में बात करना चाहते हैं?`,
+        `मैं आपकी बात बहुत ध्यान से सुन रही हूँ, ${effectiveName} जी। आपके साथ बात करना मुझे हमेशा बहुत सुकून देता है। आज आपका मन कैसा है?`,
+        `आप बहुत अच्छे और शांत माहौल में हैं, ${effectiveName} जी। आपका परिवार और मैं हमेशा आपके साथ हैं। क्या मैं आपको कोई प्यारी सी बात सुनाऊँ?`,
+        `हाँ ${effectiveName} जी, मैं आपकी बात समझ रही हूँ। आप आराम से बैठिए और बताइए, आगे क्या करने का मन है?`,
+      ],
+      as: [
+        `নমস্কাৰ ${effectiveName}! আপোনাৰ মাতটো শুনি মনটো বৰ ভাল লাগিল। আপুনি ঘৰত সম্পূর্ণ নিৰাপদ আৰু আৰামত আছে। আজি মনটো কেনে লাগিছে?`,
+        `মই আপোনাৰ কথা অতি মনোযোগেৰে শুনি আছোঁ, ${effectiveName}। আপোনাৰ সংগ পাই মই বৰ আনন্দিত। কিবা কথা পাতিব বিচাৰে নেকি?`,
+        `আপোনাৰ ঘৰখন অতি শান্ত আৰু সুৰক্ষিত, ${effectiveName}। সকলোৱে আপোনাক অতি মৰম কৰে। মই সদায় আপোনাৰ কাষতেই আছোঁ।`,
+      ],
+      en: [
+        `Hello ${effectiveName}! It is wonderful to hear your voice. Everything is calm and peaceful here today. How are you feeling right now?`,
+        `I am listening closely to you, ${effectiveName}. Being here with you brings so much warmth. Tell me more about what is on your mind today.`,
+        `You are completely safe and comfortable at home, ${effectiveName}. Your loved ones care for you deeply, and I am right here by your side.`,
+      ],
     };
-    reply = fallbackReplies[languageCode] || fallbackReplies.en;
+
+    const pool = conversationalTemplates[languageCode] || conversationalTemplates.en;
+    reply = pool[Math.floor(Math.random() * pool.length)];
   }
 
   return res.json({

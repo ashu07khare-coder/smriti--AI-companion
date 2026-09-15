@@ -1,11 +1,13 @@
 import "dotenv/config";
 import express from "express";
+import http from "http";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { apiRouter } from "./server/routes";
 
 async function startServer() {
   const app = express();
+  const server = http.createServer(app);
   const PORT = 3000;
 
   // JSON and URL-encoded body parsing
@@ -27,7 +29,12 @@ async function startServer() {
   // Vite middleware for development vs static files for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: {
+          server,
+        },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -39,7 +46,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Smriti Server running on http://0.0.0.0:${PORT}`);
   });
 }

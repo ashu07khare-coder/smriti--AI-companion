@@ -15,6 +15,8 @@ import {
   User,
   Heart,
   MessageCircle,
+  Key,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface SpeakWithSmritiModalProps {
@@ -41,6 +43,9 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
   const [isThinking, setIsThinking] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [speechSupported, setSpeechSupported] = useState(true);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [customKeyInput, setCustomKeyInput] = useState(() => smritiAi.getApiKey() || '');
+  const [keySavedMessage, setKeySavedMessage] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionInstanceRef = useRef<any>(null);
@@ -313,14 +318,92 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="w-9 h-9 rounded-full bg-white/80 border border-[#173C36]/10 text-[#173C36] flex items-center justify-center hover:bg-white active:scale-95 transition-all"
-            aria-label="Close Smriti AI conversation"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setShowKeyModal(true)}
+              className={`px-2.5 py-1 rounded-full border text-[11px] font-bold flex items-center gap-1 transition-all shadow-2xs ${
+                smritiAi.getApiKey()
+                  ? 'bg-[#E1F5EE] border-[#2F9E76]/30 text-[#1F8A5F] hover:bg-[#c9efe0]'
+                  : 'bg-[#FFFBEF] border-[#173C36]/20 text-[#173C36]/80 hover:bg-[#F5C244]/20'
+              }`}
+              title="Configure or enter Gemini API Key"
+            >
+              <Key className="w-3 h-3 text-[#E07936]" />
+              <span>{smritiAi.getApiKey() ? 'Gemini Key Active' : 'Set Gemini Key'}</span>
+            </button>
+
+            <button
+              onClick={onClose}
+              className="w-9 h-9 rounded-full bg-white/80 border border-[#173C36]/10 text-[#173C36] flex items-center justify-center hover:bg-white active:scale-95 transition-all"
+              aria-label="Close Smriti AI conversation"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
+        {/* Gemini API Key Configuration Drawer / Modal */}
+        {showKeyModal && (
+          <div className="p-4 bg-[#FFFBEF] border-b border-[#173C36]/15 animate-in slide-in-from-top-2">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Key className="w-4 h-4 text-[#E07936]" />
+                <span className="text-xs font-bold text-[#173C36]">Gemini API Key Setup</span>
+              </div>
+              <button
+                onClick={() => {
+                  setShowKeyModal(false);
+                  setKeySavedMessage(false);
+                }}
+                className="text-xs text-[#173C36]/60 hover:text-[#173C36]"
+              >
+                Close
+              </button>
+            </div>
+            <p className="text-[11px] text-[#173C36]/80 mb-2">
+              Enter your Google Gemini API key to enable live AI responses. Keys are saved safely in your browser.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={customKeyInput}
+                onChange={e => {
+                  setCustomKeyInput(e.target.value);
+                  setKeySavedMessage(false);
+                }}
+                placeholder="AIzaSy..."
+                className="flex-1 px-3 py-1.5 rounded-xl bg-white border border-[#173C36]/20 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#173C36]"
+              />
+              <button
+                onClick={() => {
+                  smritiAi.setApiKey(customKeyInput);
+                  setKeySavedMessage(true);
+                  setTimeout(() => setKeySavedMessage(false), 3000);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#173C36] text-white text-xs font-bold hover:bg-[#1f4e46] transition-all"
+              >
+                Save
+              </button>
+              {customKeyInput && (
+                <button
+                  onClick={() => {
+                    setCustomKeyInput('');
+                    smritiAi.setApiKey('');
+                    setKeySavedMessage(false);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-red-100 text-red-700 text-xs font-semibold hover:bg-red-200 transition-all"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {keySavedMessage && (
+              <p className="text-[11px] text-[#2F9E76] font-bold mt-1.5 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> API Key saved! Smriti will now use live Gemini.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Living Audio Presence Banner */}
         <div className="px-5 py-3 bg-[#FFF9E8] border-b border-[#173C36]/5 flex items-center justify-between">

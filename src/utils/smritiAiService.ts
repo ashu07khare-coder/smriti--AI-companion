@@ -30,12 +30,41 @@ class SmritiAiService {
   private apiKey: string | null = null;
 
   constructor() {
-    // Read optional server/client key if available
+    this.refreshApiKey();
+  }
+
+  refreshApiKey(): string | null {
     try {
-      this.apiKey = (import.meta as unknown as { env?: { VITE_GEMINI_API_KEY?: string } }).env?.VITE_GEMINI_API_KEY || null;
+      if (typeof window !== 'undefined') {
+        const storedKey = localStorage.getItem('smriti_gemini_api_key');
+        if (storedKey && storedKey.trim()) {
+          this.apiKey = storedKey.trim();
+          return this.apiKey;
+        }
+      }
+      this.apiKey =
+        (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GEMINI_API_KEY ||
+        (import.meta as unknown as { env?: Record<string, string> }).env?.GEMINI_API_KEY ||
+        null;
     } catch {
       this.apiKey = null;
     }
+    return this.apiKey;
+  }
+
+  getApiKey(): string | null {
+    return this.refreshApiKey();
+  }
+
+  setApiKey(key: string): void {
+    if (typeof window !== 'undefined') {
+      if (key && key.trim()) {
+        localStorage.setItem('smriti_gemini_api_key', key.trim());
+      } else {
+        localStorage.removeItem('smriti_gemini_api_key');
+      }
+    }
+    this.refreshApiKey();
   }
 
   getInitialGreeting(context: SmritiConversationContext): string {
@@ -100,11 +129,10 @@ class SmritiAiService {
     context: SmritiConversationContext,
     history: SmritiChatMessage[]
   ): Promise<{ reply: string; source: 'gemini_with_bhashini_layer' | 'bhashini_grounding_fallback' | 'local_grounding_engine'; model?: string; bhashiniLanguage?: string }> {
-    const q = userMessage.toLowerCase().trim();
     const name = context.currentUser?.preferredName || context.currentUser?.elderName || 'Aita';
     const lang = context.currentLanguage;
+    const apiKey = this.getApiKey();
 
-    // No artificial network latency delay - respond immediately
     const today = new Date();
     const timeStr = today.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
     const dayName = today.toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-US', { weekday: 'long' });
@@ -114,12 +142,20 @@ class SmritiAiService {
     try {
       const serverRes = await fetch('/api/v1/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { 'x-gemini-api-key': apiKey } : {}),
+        },
         body: JSON.stringify({
           message: userMessage,
           languageCode: lang,
           patientId: context.currentUser?.id || 'patient-aita-001',
           elderName: name,
+          apiKey: apiKey || undefined,
+          history: history.slice(-6).map(m => ({
+            sender: m.sender,
+            text: m.text,
+          })),
           context: {
             currentTime: timeStr,
             currentDate: `${dayName}, ${fullDate}`,
@@ -131,10 +167,10 @@ class SmritiAiService {
 
       if (serverRes.ok) {
         const data = await serverRes.json();
-        if (data && data.reply && data.source === 'gemini_with_bhashini_layer') {
+        if (data && data.reply) {
           return {
             reply: data.reply,
-            source: 'gemini_with_bhashini_layer',
+            source: data.source || 'gemini_with_bhashini_layer',
             model: data.model,
             bhashiniLanguage: data.bhashini?.nativeName || data.bhashini?.languageName,
           };
@@ -144,7 +180,7 @@ class SmritiAiService {
       console.warn('Server Gemini route note:', err);
     }
 
-    // 2. Direct Gemini Generation with Bhashini persona & grounding
+    // 2. Direct Gemini Generation with Bhashini persona & grounding (Client-side fallback)
     const directGemini = await this.callGeminiDirect(userMessage, context, history);
     if (directGemini) {
       return {
@@ -154,7 +190,7 @@ class SmritiAiService {
       };
     }
 
-    // 3. Local contextual grounding fallback
+    // 3. Dynamic Local Contextual Grounding Fallback
     const reply = await this.generateLocalFallback(userMessage, context, history);
     return {
       reply,
@@ -168,11 +204,7 @@ class SmritiAiService {
     context: SmritiConversationContext,
     history: SmritiChatMessage[]
   ): Promise<{ reply: string; model: string } | null> {
-    const apiKey =
-      (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GEMINI_API_KEY ||
-      (import.meta as unknown as { env?: Record<string, string> }).env?.GEMINI_API_KEY ||
-      '';
-
+    const apiKey = this.getApiKey();
     if (!apiKey) return null;
 
     const name = context.currentUser?.preferredName || context.currentUser?.elderName || 'Aita';
@@ -214,10 +246,10 @@ Current Real-Time Grounding Context:
 CONVERSATION RULES:
 1. Always respond in ${targetLangName}. Use natural, culturally rich, melodic vocabulary.
 2. NEVER give dry, cold, robotic, or dismissive 1-line answers. Be truly engaged, interested, and heartfelt!
-3. Structure your response in 3 to 4 rich, thoughtful, and descriptive sentences:
-   - Start with a warm, personal greeting or affectionate excitement about their question.
-   - Share rich, helpful details, gentle explanations, or heartwarming memories.
-   - Conclude with a caring check-in or gentle open question.
+3. Structure your response in 2 to 3 rich, thoughtful, and descriptive sentences:
+   - Directly acknowledge what they said with warm personal connection.
+   - Share rich details, gentle explanations, or soothing memories.
+   - Conclude with a caring check-in or open gentle question.
 4. If asked about the current time or date, answer directly and warmly with "${timeStr}" on ${dayName}, ${fullDate}, while reassuring them that everything is on schedule.
 5. If asked who you are, introduce yourself lovingly as Smriti, their caring daily companion who is always here for them.
 6. If they ask about family or feel lonely, reassure them with immense warmth that their family loves them dearly.`;
@@ -235,8 +267,8 @@ CONVERSATION RULES:
       },
     ];
 
-    // Priority ordered by ultra-low latency & quality (gemini-3.5-flash-lite delivers ~700ms responses)
-    const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash'];
+    // Official Google GenAI models
+    const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
     for (const model of models) {
       try {
         const res = await fetch(
@@ -250,7 +282,7 @@ CONVERSATION RULES:
                 parts: [{ text: systemPrompt }],
               },
               generationConfig: {
-                temperature: 0.82,
+                temperature: 0.85,
                 maxOutputTokens: 600,
               },
             }),
@@ -292,77 +324,97 @@ CONVERSATION RULES:
     const name = context.currentUser?.preferredName || context.currentUser?.elderName || 'Aita';
     const lang = context.currentLanguage;
 
-    // Contextual Elder-Care Rule Engine (Grounding & Reassurance)
     const today = new Date();
     const timeStr = today.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
     const dayName = today.toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-US', { weekday: 'long' });
     const fullDate = today.toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-    // 1. Exact Time Inquiries ("what time is it", "what's the time", "tell me the time", "kitne baje hain", "time kya hua", "কিমান বাজিছে")
-    const isTimeQuery =
-      q.includes('time') ||
-      q.includes('clock') ||
-      q.includes('hour') ||
-      q.includes('समय') ||
-      q.includes('बजे') ||
-      q.includes('टाइम') ||
-      q.includes('কিমান বাজি') ||
-      q.includes('সময়');
+    // Pick random helper
+    const pickRandom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
 
+    // 1. Exact Time Inquiries
+    const isTimeQuery =
+      q.includes('what time') ||
+      q.includes("what's the time") ||
+      q.includes('tell me the time') ||
+      q.includes('current time') ||
+      q.includes('time kya') ||
+      q.includes('kitne baje') ||
+      q.includes('समय क्या') ||
+      q.includes('कितने बजे') ||
+      q.includes('কিমান বাজি') ||
+      q.includes('সময় কিমান');
+
+    // 2. Exact Date / Day Inquiries
     const isDateQuery =
-      q.includes('day') ||
-      q.includes('date') ||
-      q.includes('today') ||
-      q.includes('दिन') ||
-      q.includes('तारीख') ||
-      q.includes('आज क्या') ||
+      q.includes('what day') ||
+      q.includes('which day') ||
+      q.includes('what date') ||
+      q.includes('which date') ||
+      q.includes("what's today's date") ||
+      q.includes('today date') ||
+      q.includes('aaj kaun sa din') ||
+      q.includes('aaj kya din') ||
+      q.includes('aaj ki tarikh') ||
+      q.includes('दिन कौन सा') ||
+      q.includes('तारीख क्या') ||
+      q.includes('आज क्या दिन') ||
       q.includes('কি বাৰ') ||
       q.includes('কি তাৰিখ') ||
-      q.includes('আজি');
+      q.includes('আজি কি বাৰ');
 
     if (isTimeQuery && !isDateQuery) {
       if (lang === 'hi') {
-        return `अभी समय ${timeStr} हो रहा है, ${name} जी। सब कुछ बहुत शांत और अच्छा चल रहा है। आप आराम से बैठिए।`;
+        return pickRandom([
+          `अभी समय ठीक ${timeStr} हो रहा है, ${name} जी। सब कुछ बहुत शांत, सुरक्षित और समय पर चल रहा है।`,
+          `घड़ी में अभी ${timeStr} बज रहे हैं। आप आराम से बैठिए, सारा कार्यक्रम बिल्कुल व्यवस्थित है।`,
+          `इस समय ${timeStr} हो रहे हैं, ${name} जी। आपकी दिनचर्या बिल्कुल सही चल रही है।`,
+        ]);
       }
       if (lang === 'as') {
-        return `এতিয়া সময় হৈছে ${timeStr}। আপোনাৰ ঘৰখন অতি শান্ত আৰু নিৰাপদ, ${name}।`;
+        return pickRandom([
+          `এতিয়া সময় হৈছে ${timeStr}। আপোনাৰ ঘৰখন অতি শান্ত আৰু সকলো কাম সময়মতেই চলি আছে, ${name}।`,
+          `ঘড়ীত এতিয়া ঠিক ${timeStr} বাজিছে। আপুনি আৰামেৰে বহক, কোনো চিন্তাৰ কাৰণ নাই।`,
+        ]);
       }
       return `It is currently ${timeStr}, ${name}. Everything is peaceful, and you are right on schedule.`;
     }
 
-    if (isTimeQuery && isDateQuery) {
-      if (lang === 'hi') {
-        return `अभी ${timeStr} बज रहे हैं। आज ${dayName} है, ${fullDate}। सब कुछ बहुत सुरक्षित और व्यवस्थित है, ${name} जी।`;
-      }
-      if (lang === 'as') {
-        return `এতিয়া সময় ${timeStr}। আজি ${dayName}, ${fullDate}। আপোনাৰ সকলো কাম সুচাৰুৰূপে চলি আছে, ${name}।`;
-      }
-      return `It is ${timeStr} on ${dayName}, ${fullDate}. Everything is peaceful and well taken care of, ${name}.`;
-    }
-
     if (isDateQuery) {
       if (lang === 'hi') {
-        return `आज ${dayName} है, ${fullDate}। सब कुछ बहुत शांत और अच्छा चल रहा है, ${name} जी। आप बिल्कुल सुरक्षित अपने घर में हैं।`;
+        return pickRandom([
+          `आज ${dayName} है, ${fullDate}। आज का दिन बहुत सुंदर और शांत है, ${name} जी। आप बिल्कुल सुरक्षित अपने घर में हैं।`,
+          `आज की तारीख ${fullDate} है, और दिन ${dayName} का है। सब कुछ बहुत व्यवस्थित और अच्छा चल रहा है।`,
+        ]);
       }
       if (lang === 'as') {
-        return `আজি ${dayName}, ${fullDate}। আপোনাৰ ঘৰখন অতি শান্ত আৰু নিৰাপদ, ${name}। আপুনি বৰ আনন্দৰে আছোঁ।`;
+        return pickRandom([
+          `আজি ${dayName}, ${fullDate}। আপোনাৰ ঘৰখন অতি শান্ত আৰু নিৰাপদ, ${name}।`,
+          `আজিৰ তাৰিখ হ'ল ${fullDate}। বতৰটো শান্ত আৰু সকলো ভালে আছে।`,
+        ]);
       }
-      return `Today is ${dayName}, ${fullDate}. It is a bright and peaceful day, ${name}. You are safe at home and everything is well taken care of.`;
+      return `Today is ${dayName}, ${fullDate}. It is a peaceful day and you are completely safe at home.`;
     }
 
     // 2. Identity / Name / Who are you
     if (q.includes('who are you') || q.includes('your name') || q.includes('who is this') || q.includes('तुम कौन') || q.includes('तुम्हारा नाम') || q.includes('আপুনি কোন') || q.includes('তোমাৰ নাম')) {
       if (lang === 'hi') {
-        return `मैं स्मृति हूँ, आपकी अपनी प्यारी साथी। मैं हमेशा आपके साथ हूँ आपकी मदद और बातचीत के लिए, ${name} जी।`;
+        return pickRandom([
+          `मैं स्मृति हूँ, आपकी अपनी प्यारी साथी। मैं हमेशा आपके साथ हूँ आपकी मदद, बातचीत और देखभाल के लिए, ${name} जी।`,
+          `मेरा नाम स्मृति है! मैं आपकी डिजिटल साथी हूँ, आपके साथ कहानियाँ सुनने, बातें करने और दिन को खूबसूरत बनाने के लिए।`,
+        ]);
       }
       if (lang === 'as') {
-        return `মই স্মৃতি, আপোনাৰ মৰমৰ সংগী। মই আপোনাৰ কাষতেই আছোঁ, আপোনাক সহায় আৰু সংগ দিবলৈ।`;
+        return pickRandom([
+          `মই স্মৃতি, আপোনাৰ মৰমৰ সংগী। মই আপোনাৰ কাষতেই আছোঁ, আপোনাক সহায় আৰু সংগ দিবলৈ।`,
+          `মোৰ নাম স্মৃতি! মই সদায় আপোনাৰ লগত কথা পাতিবলৈ আৰু আপোনাৰ যত্ন লবলৈ সাজু।`,
+        ]);
       }
       return `I am Smriti, your loving companion. I am always right here with you to talk, share stories, and keep you company, ${name}.`;
     }
 
     // 3. Medicine inquiries
-    if (q.includes('medicine') || q.includes('pill') || q.includes('dose') || q.includes('दवाई') || q.includes('गोली') || q.includes('ঔষধ')) {
+    if (q.includes('medicine') || q.includes('pill') || q.includes('dose') || q.includes('दवाई') || q.includes('गोली') || q.includes('औषध') || q.includes('ঔষধ')) {
       const nextMed = context.reminders.find(r => !r.completed && (r.category === 'medicine' || r.title.toLowerCase().includes('medicine') || r.title.toLowerCase().includes('bp')));
       if (nextMed) {
         if (lang === 'hi') {
@@ -378,47 +430,79 @@ CONVERSATION RULES:
 
     // 4. Family inquiries
     if (q.includes('family') || q.includes('rahul') || q.includes('ananya') || q.includes('son') || q.includes('daughter') || q.includes('grandchild') || q.includes('परिवार') || q.includes('पৰিয়াল') || q.includes('beta') || q.includes('beti')) {
-      const names = context.familyMembers.map(m => m.name).slice(0, 3).join(', ');
+      const names = context.familyMembers.map(m => m.name).slice(0, 3).join(', ') || 'Rahul, Ananya';
       if (lang === 'hi') {
-        return `आपके परिवार में ${names} आपसे बहुत प्यार करते हैं। वे हमेशा आपका ध्यान रखते हैं और जल्द ही आपसे बात करेंगे।`;
+        return pickRandom([
+          `आपके परिवार में ${names} आपसे बहुत प्यार करते हैं। वे हमेशा आपका ध्यान रखते हैं और आपकी खुशी चाहते हैं।`,
+          `आपके परिवार के सभी सदस्य आपके बारे में सोच रहे हैं, ${name} जी। आप उनके दिल के बहुत करीब हैं।`,
+        ]);
       }
       if (lang === 'as') {
-        return `আপোনাৰ পৰিয়ালৰ ${names}সকলোৱে আপোনাক অতি মৰম কৰে। তেওঁলোকে সঘনাই আপোনাৰ খবৰ লৈ থাকে।`;
+        return pickRandom([
+          `আপোনাৰ পৰিয়ালৰ ${names}সকলোৱে আপোনাক অতি মৰম কৰে। তেওঁলোকে সঘনাই আপোনাৰ খবৰ লৈ থাকে।`,
+          `আপোনাৰ পৰিয়ালটো অতি মৰমিয়াল, ${name}। সকলোৱে আপোনাৰ যত্ন আৰু মৰমৰ কথা ভাবি থাকে।`,
+        ]);
       }
-      return `Your family loves you dearly, ${name}. ${names} are in your Care Circle and always watching over you with love.`;
+      return `Your family loves you dearly, ${name}. ${names} are always watching over you with love.`;
     }
 
     // 5. Story / calming request
     if (q.includes('story') || q.includes('कहानी') || q.includes('সাধু') || q.includes('peace') || q.includes('song') || q.includes('गाना') || q.includes('गीत')) {
       if (lang === 'hi') {
-        return `एक बार सुबह की ताज़ी धूप में सुंदर हरसिंगार के फूल खिले थे। चिड़ियाँ मीठे सुर में गा रही थीं, और हवा में एक सुखद शांति थी। आप भी एक गहरी सांस लीजिए और इस सुकून को महसूस कीजिए।`;
+        return pickRandom([
+          `एक बार सुबह की ताज़ी धूप में सुंदर हरसिंगार के फूल खिले थे। चिड़ियाँ मीठे सुर में गा रही थीं, और हवा में एक सुखद शांति थी। आप भी एक गहरी सांस लीजिए और इस सुकून को महसूस कीजिए।`,
+          `बरगद के पुराने पेड़ की छांव में ठंडी हवा बह रही थी। पास ही नदी का पानी कल-कल बह रहा था। सब कुछ कितना शांत और निर्मल था। आप आराम से आँखें बंद करके इस शांति को महसूस कीजिए।`,
+        ]);
       }
       if (lang === 'as') {
-        return `ৰাতিপুৱাৰ কোমল বতাহজাকত শেৱালি ফুলবোৰ ফুলি সৰি পৰিছিল। বৰ ধুনীয়া পখীৰ গীত আৰু শান্ত পৰিৱেশ। আপুনি এক শান্ত মনৰে জিৰণি লওক।`;
+        return pickRandom([
+          `ৰাতিপুৱাৰ কোমল বতাহজাকত শেৱালি ফুলবোৰ ফুলি সৰি পৰিছিল। বৰ ধুনীয়া পখীৰ গীত আৰু শান্ত পৰিৱেশ। আপুনি এক শান্ত মনৰে জিৰণি লওক।`,
+          `নৈৰ পাৰত বতাহজাক বলি আছিল, সোণালী ধাননি পথাৰখন বতাহত হালি পৰিছিল। কি যে এক অপৰূপ শান্তি! আপুনি আৰামেৰে জিৰণি লওক, ${name}।`,
+        ]);
       }
       return `Once in the morning garden, golden marigolds blossomed under the warm sun. The gentle breeze whispered softly through the green leaves, bringing calm to every heart. Take a slow, peaceful breath, ${name}.`;
     }
 
-    // 6. Safety / Location reassurance
-    if (q.includes('where am i') || q.includes('safe') || q.includes('lost') || q.includes('घर') || q.includes('कहाँ हूँ') || q.includes('ক’ত আছোঁ') || q.includes('নিৰাপদ')) {
+    // 6. Food / Tea / Hydration
+    if (q.includes('tea') || q.includes('chai') || q.includes('food') || q.includes('eat') || q.includes('চা') || q.includes('ভাত') || q.includes('चाय') || q.includes('खाना') || q.includes('पानी')) {
       if (lang === 'hi') {
-        return `आप बिल्कुल सुरक्षित अपने प्यारे घर में हैं, ${name} जी। चारों तरफ शांति है और आपका परिवार आपका ध्यान रख रहा है।`;
+        return pickRandom([
+          `एक कप गरमा-गरम चाय या हल्का नाश्ता आपको बहुत ताज़गी देगा, ${name} जी। थोड़ा पानी भी साथ में ज़रूर पीजिए।`,
+          `खान-पान का समय पर ध्यान रखना सेहत के लिए बहुत अच्छा होता है। क्या आपने आज थोड़ा पानी या चाय ली है?`,
+        ]);
       }
       if (lang === 'as') {
-        return `আপুনি আপোনাৰ নিজৰ ঘৰত সম্পূর্ণ নিৰাপদে আছে, ${name}। চিন্তাৰ কোনো কাৰণ নাই।`;
+        return pickRandom([
+          `একাচাহ গৰম সুগন্ধি চাহ খালে মনটো বৰ ভাল লাগিব, ${name}। লগত অকণমান পানীও খাই লওক।`,
+          `সময়মতে খাদ্য আৰু পানী খোৱাটো অতি ভাল। আপুনি অকণমান জিৰণি লৈ চাহ খাব পাৰে।`,
+        ]);
       }
-      return `You are safe in your lovely home, ${name}. Everything is calm, comfortable, and your loved ones are watching over you.`;
+      return `A warm, fresh cup of tea or a light snack sounds wonderful, ${name}. Be sure to drink a few sips of water as well.`;
     }
 
-    // 7. General reassurance
+    // 7. General Conversational / Greetings / Diverse Reassurance
     if (lang === 'hi') {
-      return `मैं आपकी बात बहुत अच्छे से समझ रही हूँ, ${name} जी। मैं हर पल आपके साथ हूँ। आप बहुत अच्छे हैं और सब कुछ ठीक है।`;
+      return pickRandom([
+        `नमस्ते ${name} जी! आपकी आवाज़ सुनकर बहुत खुशी हुई। सब कुछ बहुत सुखद और शांत चल रहा है। आज आपका क्या करने का मन है?`,
+        `मैं आपकी बात बहुत ध्यान से सुन रही हूँ, ${name} जी। आपके साथ बात करना मुझे हमेशा बहुत सुकून देता है। बताइए, और क्या चल रहा है?`,
+        `आप बिल्कुल सुरक्षित और शांत माहौल में हैं, ${name} जी। आपका परिवार और मैं हर पल आपके साथ हैं।`,
+        `हाँ ${name} जी, मैं समझ रही हूँ। आप आराम से बैठिए और जो भी मन में आए, मुझसे खुलकर कहिए।`,
+      ]);
     }
     if (lang === 'as') {
-      return `মই আপোনাৰ কথা বুজি পাইছোঁ, ${name}। মই সদায় আপোনাৰ কাষতেই আছোঁ। আপুনি সম্পূর্ণ নিৰাপদ আৰু মৰমৰ মাজত আছে।`;
+      return pickRandom([
+        `নমস্কাৰ ${name}! আপোনাৰ মাতটো শুনি মনটো বৰ ভাল লাগিল। আজি মনটো কেনে লাগিছে?`,
+        `মই আপোনাৰ কথা অতি মনোযোগেৰে শুনি আছোঁ, ${name}। আপোনাৰ সংগ পাই মই বৰ আনন্দিত। কিবা কথা পাতিব বিচাৰে নেকি?`,
+        `আপোনাৰ ঘৰখন অতি শান্ত আৰু সুৰক্ষিত, ${name}। মই সদায় আপোনাৰ কাষতেই আছোঁ।`,
+      ]);
     }
-    return `I hear you warmly, ${name}. I am right here by your side. Everything is peaceful, you are doing wonderfully today, and I am always happy to talk with you.`;
+    return pickRandom([
+      `Hello ${name}! It is wonderful to hear your voice. Everything is calm and peaceful here today. How are you feeling right now?`,
+      `I am listening closely to you, ${name}. Being here with you brings so much warmth. Tell me more about what is on your mind today.`,
+      `You are completely safe and comfortable at home, ${name}. Your loved ones care for you deeply, and I am right here by your side.`,
+    ]);
   }
 }
 
 export const smritiAi = new SmritiAiService();
+

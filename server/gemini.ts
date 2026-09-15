@@ -1,18 +1,20 @@
 import { GoogleGenAI } from '@google/genai';
 
 let geminiClient: GoogleGenAI | null = null;
+let lastApiKey: string | null = null;
 
-export function getGemini(): GoogleGenAI | null {
-  if (geminiClient) {
-    return geminiClient;
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY;
+export function getGemini(explicitApiKey?: string): GoogleGenAI | null {
+  const apiKey = explicitApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return null;
   }
 
+  if (geminiClient && lastApiKey === apiKey) {
+    return geminiClient;
+  }
+
   try {
+    lastApiKey = apiKey;
     geminiClient = new GoogleGenAI({
       apiKey,
       httpOptions: {
@@ -31,3 +33,4 @@ export function getGemini(): GoogleGenAI | null {
 export function isGeminiConfigured(): boolean {
   return !!process.env.GEMINI_API_KEY;
 }
+
