@@ -3,7 +3,7 @@ import { db } from './store';
 import { executeNightlyScoring } from './scoringEngine';
 import { SyncDeltaRequest, SyncDeltaResponse, DbExerciseSession, DbReminder } from './types';
 import { getSupabase, isSupabaseConfigured } from './supabase';
-import { getGemini, isGeminiConfigured } from './gemini';
+import { getGemini, getAllGeminiKeys, isGeminiConfigured } from './gemini';
 import { buildBhashiniGeminiSystemPrompt, getBhashiniProfile, BHASHINI_PROFILES } from './bhashiniLayer';
 
 export const apiRouter = Router();
@@ -593,7 +593,7 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
 
   const bhashiniProfile = getBhashiniProfile(languageCode);
   const explicitKey = (apiKey as string) || (req.headers['x-gemini-api-key'] as string);
-  const ai = getGemini(explicitKey);
+  const candidateKeys = explicitKey ? [explicitKey, ...getAllGeminiKeys()] : getAllGeminiKeys();
 
   // Find user / patient info
   const user = db.users.find(u => u.id === patientId);
@@ -638,9 +638,12 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
     },
   ];
 
-  if (ai) {
-    // Active Gemini API models
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
+  const modelsToTry = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
+
+  for (const currentKey of candidateKeys) {
+    const ai = getGemini(currentKey);
+    if (!ai) continue;
+
     for (const modelName of modelsToTry) {
       try {
         const response = await ai.models.generateContent({
@@ -668,7 +671,7 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
           });
         }
       } catch (err: any) {
-        console.warn(`[Gemini + Bhashini] ${modelName} call error:`, err?.message || err);
+        console.warn(`[Gemini + Bhashini] Key ${currentKey.slice(0, 8)}... model ${modelName} call error:`, err?.message || err);
       }
     }
   }

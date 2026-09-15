@@ -33,22 +33,39 @@ class SmritiAiService {
     this.refreshApiKey();
   }
 
-  refreshApiKey(): string | null {
+  getAllApiKeys(): string[] {
+    const keys: string[] = [];
     try {
       if (typeof window !== 'undefined') {
-        const storedKey = localStorage.getItem('smriti_gemini_api_key');
-        if (storedKey && storedKey.trim()) {
-          this.apiKey = storedKey.trim();
-          return this.apiKey;
+        const stored = localStorage.getItem('smriti_gemini_api_key');
+        if (stored) {
+          stored.split(',').map(s => s.trim()).filter(Boolean).forEach(k => {
+            if (!keys.includes(k)) keys.push(k);
+          });
         }
       }
-      this.apiKey =
-        (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GEMINI_API_KEY ||
-        (import.meta as unknown as { env?: Record<string, string> }).env?.GEMINI_API_KEY ||
-        null;
+      const envList = [
+        (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GEMINI_API_KEY,
+        (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GEMINI_API_KEY_2,
+        (import.meta as unknown as { env?: Record<string, string> }).env?.GEMINI_API_KEY,
+        (import.meta as unknown as { env?: Record<string, string> }).env?.GEMINI_API_KEY_2,
+        (import.meta as unknown as { env?: Record<string, string> }).env?.GEMINI_API_KEYS,
+      ];
+      for (const item of envList) {
+        if (!item) continue;
+        item.split(',').map(s => s.trim()).filter(Boolean).forEach(k => {
+          if (!keys.includes(k)) keys.push(k);
+        });
+      }
     } catch {
-      this.apiKey = null;
+      // ignore
     }
+    return keys;
+  }
+
+  refreshApiKey(): string | null {
+    const all = this.getAllApiKeys();
+    this.apiKey = all[0] || null;
     return this.apiKey;
   }
 
@@ -204,8 +221,8 @@ class SmritiAiService {
     context: SmritiConversationContext,
     history: SmritiChatMessage[]
   ): Promise<{ reply: string; model: string } | null> {
-    const apiKey = this.getApiKey();
-    if (!apiKey) return null;
+    const candidateKeys = this.getAllApiKeys();
+    if (candidateKeys.length === 0) return null;
 
     const name = context.currentUser?.preferredName || context.currentUser?.elderName || 'Aita';
     const lang = context.currentLanguage;
@@ -269,38 +286,40 @@ CONVERSATION RULES:
 
     // Active Gemini API models
     const models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
-    for (const model of models) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents,
-              systemInstruction: {
-                parts: [{ text: systemPrompt }],
-              },
-              generationConfig: {
-                temperature: 0.85,
-                maxOutputTokens: 600,
-              },
-            }),
-          }
-        );
+    for (const currentKey of candidateKeys) {
+      for (const model of models) {
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${currentKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents,
+                systemInstruction: {
+                  parts: [{ text: systemPrompt }],
+                },
+                generationConfig: {
+                  temperature: 0.85,
+                  maxOutputTokens: 600,
+                },
+              }),
+            }
+          );
 
-        if (res.ok) {
-          const data = await res.json();
-          const candidate = data.candidates?.[0]?.content?.parts?.filter((p: any) => p.text).map((p: any) => p.text).join('');
-          if (candidate && candidate.trim()) {
-            return {
-              reply: candidate.trim(),
-              model,
-            };
+          if (res.ok) {
+            const data = await res.json();
+            const candidate = data.candidates?.[0]?.content?.parts?.filter((p: any) => p.text).map((p: any) => p.text).join('');
+            if (candidate && candidate.trim()) {
+              return {
+                reply: candidate.trim(),
+                model,
+              };
+            }
           }
+        } catch (e) {
+          console.warn(`Direct Gemini call on key ${currentKey.slice(0, 8)}... model ${model}:`, e);
         }
-      } catch (e) {
-        console.warn(`Direct Gemini call on ${model}:`, e);
       }
     }
     return null;
