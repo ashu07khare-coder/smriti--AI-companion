@@ -639,8 +639,8 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
   ];
 
   if (ai) {
-    // Official Google GenAI models
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'];
+    // Active Gemini API models
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
     for (const modelName of modelsToTry) {
       try {
         const response = await ai.models.generateContent({

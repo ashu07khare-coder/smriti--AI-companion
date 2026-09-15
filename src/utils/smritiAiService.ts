@@ -267,8 +267,8 @@ CONVERSATION RULES:
       },
     ];
 
-    // Official Google GenAI models
-    const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    // Active Gemini API models
+    const models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
     for (const model of models) {
       try {
         const res = await fetch(
