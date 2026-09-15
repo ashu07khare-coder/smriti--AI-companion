@@ -39,10 +39,12 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
   const [speechSupported, setSpeechSupported] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionInstanceRef = useRef<any>(null);
+  const finalTranscriptRef = useRef<string>('');
 
   // Initialize conversation when modal opens
   useEffect(() => {
@@ -70,28 +72,70 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
       });
     } else {
       bhashiniVoice.stop();
-      if (recognitionRef.current) {
+      if (recognitionInstanceRef.current) {
         try {
-          recognitionRef.current.abort();
-        } catch {
-          // ignore
-        }
+          recognitionInstanceRef.current.abort();
+        } catch {}
       }
       setIsListening(false);
       setIsSpeaking(false);
+      setInterimTranscript('');
+      finalTranscriptRef.current = '';
     }
   }, [isOpen]);
 
-  // Setup Web Speech Recognition
+  // Clean up recognition on unmount
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechSupported(false);
+    }
+    return () => {
+      if (recognitionInstanceRef.current) {
+        try {
+          recognitionInstanceRef.current.abort();
+        } catch {}
+      }
+    };
+  }, []);
 
-    if (SpeechRecognition) {
+  // Scroll to bottom when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isThinking, interimTranscript]);
+
+  if (!isOpen) return null;
+
+  const handleStartListening = () => {
+    bhashiniVoice.stop();
+    setIsSpeaking(false);
+    setInterimTranscript('');
+    finalTranscriptRef.current = '';
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      const promptInput = window.prompt("Speak to Smriti (Type your question):");
+      if (promptInput) {
+        handleSendMessage(promptInput);
+      }
+      return;
+    }
+
+    if (recognitionInstanceRef.current) {
+      try {
+        recognitionInstanceRef.current.abort();
+      } catch {}
+    }
+
+    try {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = bhashiniVoice.getLanguageTag(currentLanguage);
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.lang = bhashiniVoice.getSpeechRecognitionLanguage(currentLanguage);
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -99,67 +143,69 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
       };
 
       recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        if (transcript) {
-          handleSendMessage(transcript);
+        let interim = '';
+        let final = '';
+        for (let i = 0; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
         }
-        setIsListening(false);
+        if (final) {
+          finalTranscriptRef.current = final;
+          setInterimTranscript(final);
+        } else if (interim) {
+          setInterimTranscript(interim);
+        }
       };
 
-      recognition.onerror = () => {
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event?.error);
+        if (event?.error === 'language-not-supported' && recognition.lang !== 'en-IN') {
+          try {
+            recognition.lang = 'en-IN';
+            recognition.start();
+            return;
+          } catch {}
+        }
         setIsListening(false);
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        const textToProcess = finalTranscriptRef.current || interimTranscript;
+        if (textToProcess && textToProcess.trim()) {
+          handleSendMessage(textToProcess.trim());
+          setInterimTranscript('');
+          finalTranscriptRef.current = '';
+        }
       };
 
-      recognitionRef.current = recognition;
-    } else {
-      setSpeechSupported(false);
+      recognition.start();
+      recognitionInstanceRef.current = recognition;
+    } catch (err) {
+      console.warn('Speech recognition start error:', err);
+      setIsListening(false);
     }
-
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {
-          // ignore
-        }
-      }
-    };
-  }, [currentLanguage]);
-
-  // Scroll to bottom when messages update
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking]);
-
-  if (!isOpen) return null;
+  };
 
   const handleToggleListening = () => {
     if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+      if (recognitionInstanceRef.current) {
+        try {
+          recognitionInstanceRef.current.stop();
+        } catch {}
       }
       setIsListening(false);
-    } else {
-      bhashiniVoice.stop();
-      setIsSpeaking(false);
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.lang = bhashiniVoice.getLanguageTag(currentLanguage);
-          recognitionRef.current.start();
-        } catch {
-          setIsListening(false);
-        }
-      } else {
-        // Speech recognition fallback
-        const promptInput = window.prompt("Speak to Smriti (Type your question):");
-        if (promptInput) {
-          handleSendMessage(promptInput);
-        }
+      const textToProcess = finalTranscriptRef.current || interimTranscript;
+      if (textToProcess && textToProcess.trim()) {
+        handleSendMessage(textToProcess.trim());
+        setInterimTranscript('');
+        finalTranscriptRef.current = '';
       }
+    } else {
+      handleStartListening();
     }
   };
 
@@ -169,6 +215,7 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
 
     bhashiniVoice.stop();
     setIsSpeaking(false);
+    setInterimTranscript('');
 
     const userMsg: SmritiChatMessage = {
       id: 'msg-' + Date.now(),
@@ -201,11 +248,11 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
       setMessages(prev => [...prev, smritiMsg]);
       setIsThinking(false);
 
-      // Auto-speak response in Bhashini voice
+      // Auto-speak response at crisp conversational pace
       setIsSpeaking(true);
       bhashiniVoice.speak(responseObj.reply, currentLanguage, () => {
         setIsSpeaking(false);
-      });
+      }, undefined, 0, 1.08);
     } catch {
       setIsThinking(false);
     }
@@ -218,7 +265,7 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
       setIsSpeaking(true);
       bhashiniVoice.speak(lastSmriti.text, currentLanguage, () => {
         setIsSpeaking(false);
-      });
+      }, undefined, 0, 1.08);
     }
   };
 
@@ -412,6 +459,19 @@ export const SpeakWithSmritiModal: React.FC<SpeakWithSmritiModalProps> = ({
 
         {/* Bottom Interactive Voice / Input Area */}
         <div className="p-4 bg-white border-t border-[#173C36]/10 shrink-0 space-y-3">
+          {/* Live Heard Words Pill */}
+          {isListening && (
+            <div className="px-4 py-2 bg-[#E1F5EE] border border-[#2F9E76]/25 rounded-2xl flex items-center gap-2.5 text-xs text-[#173C36] animate-in fade-in slide-in-from-bottom-2">
+              <span className="w-2 h-2 rounded-full bg-[#E07936] animate-ping shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="font-bold text-[#1F8A5F] mr-1.5">Hearing:</span>
+                <span className="font-medium text-[#173C36] italic truncate">
+                  {interimTranscript ? `"${interimTranscript}"` : 'Listening carefully... please speak'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Main Large Voice Speaking Button */}
           <div className="flex items-center justify-center gap-3">
             <button

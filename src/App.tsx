@@ -14,14 +14,16 @@ import { CaregiverModeModal } from './components/CaregiverModeModal';
 import { VoiceReminderModal } from './components/VoiceReminderModal';
 import { VoiceReminderActiveAlarm } from './components/VoiceReminderActiveAlarm';
 import { AuthModal } from './components/AuthModal';
+import { DemoAuthPortal } from './components/auth/DemoAuthPortal';
 import { LanguageCode, Reminder, FamilyMember, GameSession, DailyScore, CaregiverAlert, UserProfile, DailyAdherenceLog } from './types';
-import { AppStorage } from './utils/storage';
+import { AppStorage, DEFAULT_USER_PROFILE } from './utils/storage';
 import { bhashiniVoice } from './utils/bhashiniVoice';
 import { voiceReminderScheduler } from './utils/voiceReminderScheduler';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('today');
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => AppStorage.getUserProfile());
+  const [showAuthPortal, setShowAuthPortal] = useState<boolean>(() => !AppStorage.getUserProfile());
   const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>(() => {
     const profile = AppStorage.getUserProfile();
     return profile ? profile.language : AppStorage.getSelectedLanguage();
@@ -73,12 +75,14 @@ export default function App() {
   const handleAuthSuccess = (profile: UserProfile) => {
     setCurrentUser(profile);
     setCurrentLanguage(profile.language);
+    setShowAuthPortal(false);
     showToast(`Welcome back, ${profile.preferredName}!`);
   };
 
   const handleLogout = () => {
     AppStorage.logoutUser();
     setCurrentUser(null);
+    setShowAuthPortal(true);
     showToast('Logged out of Smriti');
   };
 
@@ -111,6 +115,26 @@ export default function App() {
     setIsAuthModalOpen(true);
   };
 
+  // If Auth Portal is active, show the full showcase page for evaluation / login
+  if (showAuthPortal) {
+    return (
+      <DemoAuthPortal
+        currentUser={currentUser}
+        currentLanguage={currentLanguage}
+        onAuthSuccess={handleAuthSuccess}
+        onSelectLanguage={handleSelectLanguage}
+        onSkipToDemo={() => {
+          if (!currentUser) {
+            const fallback = DEFAULT_USER_PROFILE;
+            setCurrentUser(fallback);
+            AppStorage.saveUserProfile(fallback);
+          }
+          setShowAuthPortal(false);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#FFFBEF] via-[#FFFBEF] to-[#FFF3D2] text-[#173C36] flex flex-col justify-between selection:bg-[#F5C244]/30">
       {/* Toast Notification */}
@@ -133,6 +157,7 @@ export default function App() {
         unreadCount={2}
         currentUser={currentUser}
         onOpenAuthModal={handleOpenAuth}
+        onOpenAuthDemo={() => setShowAuthPortal(true)}
       />
 
       {/* Main Tab Content */}

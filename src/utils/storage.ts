@@ -65,7 +65,21 @@ export class AppStorage {
         localStorage.setItem(KEYS.FAMILY, JSON.stringify(INITIAL_FAMILY_MEMBERS));
         return INITIAL_FAMILY_MEMBERS;
       }
-      return JSON.parse(data);
+      const parsed: FamilyMember[] = JSON.parse(data);
+      // Migrate / sync INITIAL_FAMILY_MEMBERS if old unsplash URL was stored
+      let modified = false;
+      const updated = parsed.map(m => {
+        const initial = INITIAL_FAMILY_MEMBERS.find(init => init.id === m.id);
+        if (initial && initial.photoUrl.startsWith('/photos/') && m.photoUrl !== initial.photoUrl) {
+          modified = true;
+          return { ...m, photoUrl: initial.photoUrl };
+        }
+        return m;
+      });
+      if (modified) {
+        localStorage.setItem(KEYS.FAMILY, JSON.stringify(updated));
+      }
+      return updated;
     } catch {
       return INITIAL_FAMILY_MEMBERS;
     }

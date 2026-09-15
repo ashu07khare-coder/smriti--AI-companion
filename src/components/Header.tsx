@@ -25,6 +25,7 @@ interface HeaderProps {
   unreadCount?: number;
   currentUser: UserProfile | null;
   onOpenAuthModal: (mode?: 'login' | 'signup' | 'profile') => void;
+  onOpenAuthDemo?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   unreadCount = 2,
   currentUser,
   onOpenAuthModal,
+  onOpenAuthDemo,
 }) => {
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -97,21 +99,32 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-1.5">
           {/* Current Elder Profile Badge / Login trigger */}
           {currentUser ? (
-            <button
-              onClick={() => onOpenAuthModal('profile')}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FFFDF6] border border-[#173C36]/10 hover:bg-white text-xs font-semibold text-[#173C36] shadow-xs transition-all"
-              title="View Elder Profile & Registered Contacts"
-            >
-              <div className="w-5 h-5 rounded-full bg-[#F5C244] text-[#173C36] font-bold text-[10px] flex items-center justify-center">
-                {currentUser.preferredName.charAt(0)}
-              </div>
-              <span className="max-w-[70px] truncate text-[11px]">
-                {currentUser.preferredName}
-              </span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onOpenAuthModal('profile')}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FFFDF6] border border-[#173C36]/10 hover:bg-white text-xs font-semibold text-[#173C36] shadow-xs transition-all"
+                title="View Elder Profile & Registered Contacts"
+              >
+                <div className="w-5 h-5 rounded-full bg-[#F5C244] text-[#173C36] font-bold text-[10px] flex items-center justify-center">
+                  {currentUser.preferredName.charAt(0)}
+                </div>
+                <span className="max-w-[70px] truncate text-[11px]">
+                  {currentUser.preferredName}
+                </span>
+              </button>
+              {onOpenAuthDemo && (
+                <button
+                  onClick={onOpenAuthDemo}
+                  className="px-2 py-1 rounded-full bg-[#E1F5EE] hover:bg-[#c9efe0] text-[#1F8A5F] text-[10.5px] font-bold transition-all border border-[#2F9E76]/20 shadow-2xs"
+                  title="Switch Profile or Open Demo Login Portal"
+                >
+                  Demo
+                </button>
+              )}
+            </div>
           ) : (
             <button
-              onClick={() => onOpenAuthModal('login')}
+              onClick={onOpenAuthDemo || (() => onOpenAuthModal('login'))}
               className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#173C36] text-white text-xs font-bold shadow-xs hover:bg-[#1f4e46] transition-all"
             >
               <LogIn className="w-3.5 h-3.5" />

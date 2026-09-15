@@ -140,24 +140,43 @@ export const StoryTab: React.FC<StoryTabProps> = ({ currentLanguage }) => {
     setIsPlaying(true);
     setAudioProgress(0);
 
-    bhashiniVoice.speak(story.fullScript, currentLanguage, () => {
-      setIsPlaying(false);
-      setAudioProgress(100);
-    });
+    bhashiniVoice.speak(
+      story.fullScript,
+      currentLanguage,
+      () => {
+        setIsPlaying(false);
+        setAudioProgress(100);
+      },
+      progressPercent => {
+        setAudioProgress(progressPercent);
+      }
+    );
   };
 
   const handleTogglePlay = () => {
     if (!activeStory) return;
 
     if (isPlaying) {
-      bhashiniVoice.stop();
+      bhashiniVoice.pause();
       setIsPlaying(false);
     } else {
       setIsPlaying(true);
-      bhashiniVoice.speak(activeStory.fullScript, currentLanguage, () => {
-        setIsPlaying(false);
-        setAudioProgress(100);
-      });
+      if (bhashiniVoice.isPaused()) {
+        bhashiniVoice.resume();
+      } else {
+        bhashiniVoice.speak(
+          activeStory.fullScript,
+          currentLanguage,
+          () => {
+            setIsPlaying(false);
+            setAudioProgress(100);
+          },
+          progressPercent => {
+            setAudioProgress(progressPercent);
+          },
+          audioProgress >= 100 ? 0 : audioProgress
+        );
+      }
     }
   };
 
@@ -167,16 +186,64 @@ export const StoryTab: React.FC<StoryTabProps> = ({ currentLanguage }) => {
     setActiveStory(null);
   };
 
-  // Simulated progress timer when playing
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
+  const handleRewind = () => {
+    if (!activeStory) return;
+    bhashiniVoice.playGentleTone('soft');
+    const newProgress = Math.max(0, audioProgress - 8);
+    setAudioProgress(newProgress);
     if (isPlaying) {
-      interval = setInterval(() => {
-        setAudioProgress(prev => (prev >= 100 ? 100 : prev + 1.2));
-      }, 1000);
+      bhashiniVoice.seek(
+        newProgress,
+        currentLanguage,
+        () => {
+          setIsPlaying(false);
+          setAudioProgress(100);
+        },
+        progressPercent => {
+          setAudioProgress(progressPercent);
+        }
+      );
     }
-    return () => clearInterval(interval);
-  }, [isPlaying]);
+  };
+
+  const handleForward = () => {
+    if (!activeStory) return;
+    bhashiniVoice.playGentleTone('soft');
+    const newProgress = Math.min(100, audioProgress + 8);
+    setAudioProgress(newProgress);
+    if (isPlaying) {
+      bhashiniVoice.seek(
+        newProgress,
+        currentLanguage,
+        () => {
+          setIsPlaying(false);
+          setAudioProgress(100);
+        },
+        progressPercent => {
+          setAudioProgress(progressPercent);
+        }
+      );
+    }
+  };
+
+  const handleToggleAmbient = () => {
+    const next = !ambientSound;
+    setAmbientSound(next);
+    bhashiniVoice.playGentleTone('chime');
+    if (next) {
+      bhashiniVoice.startAmbientSound();
+    } else {
+      bhashiniVoice.stopAmbientSound();
+    }
+  };
+
+  // Cleanup audio & ambient sound on tab change / unmount
+  useEffect(() => {
+    return () => {
+      bhashiniVoice.stop();
+      bhashiniVoice.stopAmbientSound();
+    };
+  }, []);
 
   const getSectionMeta = (cat: StoryCategory) => {
     return SECTIONS_CONFIG.find(s => s.id === cat) || SECTIONS_CONFIG[0];
@@ -293,10 +360,7 @@ export const StoryTab: React.FC<StoryTabProps> = ({ currentLanguage }) => {
               {/* Controls Bar */}
               <div className="flex items-center justify-center gap-5 pt-2">
                 <button
-                  onClick={() => {
-                    setAudioProgress(p => Math.max(0, p - 10));
-                    bhashiniVoice.playGentleTone('soft');
-                  }}
+                  onClick={handleRewind}
                   className="w-10 h-10 rounded-full bg-[#FFFBEF] border border-[#173C36]/10 flex items-center justify-center text-[#173C36] hover:bg-white active:scale-95"
                   title="Rewind 10s"
                 >
@@ -318,10 +382,7 @@ export const StoryTab: React.FC<StoryTabProps> = ({ currentLanguage }) => {
                 </button>
 
                 <button
-                  onClick={() => {
-                    setAudioProgress(p => Math.min(100, p + 10));
-                    bhashiniVoice.playGentleTone('soft');
-                  }}
+                  onClick={handleForward}
                   className="w-10 h-10 rounded-full bg-[#FFFBEF] border border-[#173C36]/10 flex items-center justify-center text-[#173C36] hover:bg-white active:scale-95"
                   title="Forward 10s"
                 >
@@ -332,10 +393,7 @@ export const StoryTab: React.FC<StoryTabProps> = ({ currentLanguage }) => {
               {/* Ambient River / Breeze Sound Toggle */}
               <div className="pt-2 flex items-center justify-center">
                 <button
-                  onClick={() => {
-                    setAmbientSound(!ambientSound);
-                    bhashiniVoice.playGentleTone('chime');
-                  }}
+                  onClick={handleToggleAmbient}
                   className={`px-4 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition-all ${
                     ambientSound
                       ? 'bg-[#E1F5EE] border-[#2F9E76] text-[#2F9E76]'

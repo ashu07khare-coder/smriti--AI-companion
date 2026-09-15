@@ -45,7 +45,7 @@ apiRouter.get('/health', async (req: Request, res: Response) => {
     ai: {
       gemini: {
         configured: geminiAvailable,
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.6-flash',
       },
       bhashiniLayer: {
         active: true,
@@ -614,7 +614,7 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
   });
 
   if (ai) {
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
     for (const modelName of modelsToTry) {
       try {
         const response = await ai.models.generateContent({
@@ -642,27 +642,50 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
           });
         }
       } catch (err: any) {
-        console.warn(`[Gemini + Bhashini] ${modelName} call failed, trying fallback:`, err?.message || err);
+        console.warn(`[Gemini + Bhashini] ${modelName} call failed, trying next:`, err?.message || err);
       }
     }
   }
 
   // Graceful conversational fallback with culturally grounded local language response
-  const fallbackReplies: Record<string, string> = {
-    as: `মই আপোনাৰ কথা অতি মৰমেৰে বুজি পাইছোঁ, ${effectiveName}। মই সদায় আপোনাৰ কাষতে আছোঁ। আপুনি আপোনাৰ ঘৰত সম্পূর্ণ নিৰাপদ আৰু সকলো ভালে আছে।`,
-    brx: `आं नोंथांनि रावखौ बुजिदों, ${effectiveName}। आं नोंथांनि लोगोआवनो दं। नोंथाङा गावनि नख’राव गाहाम दं।`,
-    mni: `ঐহাক্না অদোমগী ৱাফম খঙলে, ${effectiveName}। ঐহাক মতম পুম্বদা অদোমগা লোয়ননা লৈরি। অদোম অপাম্বদা লৈরি।`,
-    lus: `I thu sawi ka hria e, ${effectiveName}. I kiangah ka awm reng a nia. Hahdam deuh khan awm rawh aw.`,
-    kha: `Nga sngewthuh ia phi, ${effectiveName}. Nga don ryngkat bad phi barabor. Phi long kaba shngain ha la iing.`,
-    grt: `Anga nang·ni aganako kni·a, ${effectiveName}. Anga nang· baksa donga. Nang· nokode kema nama donga.`,
-    trp: `Ang nini kok khnaui tong, ${effectiveName}. Ang nini logote tong. Nini nogo nwng bwrwi thungba kaham tong.`,
-    nag: `Moi apuni kotha buji pailo, ${effectiveName}. Moi apuni lagot asey. Kiba chinta nakoribo, sob bhal asey.`,
-    ne: `मैले हजुरको कुरा बुझें, ${effectiveName} हजुर। म सधैं हजुरको साथमा छु। हजुर आफ्नै घरमा सुरक्षित हुनुहुन्छ।`,
-    hi: `मैं आपकी बात समझ रही हूँ, ${effectiveName} जी। मैं हर पल आपके साथ हूँ। आप अपने घर में सुरक्षित हैं और सब बहुत अच्छा चल रहा है।`,
-    en: `I hear you warmly, ${effectiveName}. I am right here by your side. You are completely safe at home, and everything is taken care of.`,
-  };
+  const q = message.toLowerCase().trim();
+  const isTimeQuery = q.includes('time') || q.includes('clock') || q.includes('hour') || q.includes('समय') || q.includes('बजे') || q.includes('কিমান বাজি');
+  const isDateQuery = q.includes('day') || q.includes('date') || q.includes('today') || q.includes('दिन') || q.includes('তাতীখ') || q.includes('বাৰ');
 
-  const reply = fallbackReplies[languageCode] || fallbackReplies.en;
+  let reply = '';
+  if (isTimeQuery) {
+    if (languageCode === 'hi') {
+      reply = `अभी समय ${currentTimeStr} हो रहा है, ${effectiveName} जी। सब कुछ बहुत शांत और सुरक्षित है।`;
+    } else if (languageCode === 'as') {
+      reply = `এতিয়া সময় হৈছে ${currentTimeStr}। আপোনাৰ সকলো কাম সময়মতেই চলি আছে, ${effectiveName}।`;
+    } else {
+      reply = `It is currently ${currentTimeStr}, ${effectiveName}. Everything is calm, safe, and right on schedule.`;
+    }
+  } else if (isDateQuery) {
+    const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    if (languageCode === 'hi') {
+      reply = `आज ${todayStr} है, ${effectiveName} जी। आप बिल्कुल सुरक्षित अपने घर में हैं।`;
+    } else if (languageCode === 'as') {
+      reply = `আজি ${todayStr}। আপোনাৰ ঘৰখন অতি শান্ত আৰু নিৰাপদ, ${effectiveName}।`;
+    } else {
+      reply = `Today is ${todayStr}, ${effectiveName}. You are safe at home and everything is well taken care of.`;
+    }
+  } else {
+    const fallbackReplies: Record<string, string> = {
+      as: `মই আপোনাৰ কথা অতি মৰমেৰে বুজি পাইছোঁ, ${effectiveName}। মই সদায় আপোনাৰ কাষতে আছোঁ। আপুনি আপোনাৰ ঘৰত সম্পূর্ণ নিৰাপদ আৰু সকলো ভালে আছে।`,
+      brx: `आं नोंथांनि रावखौ बुजिदों, ${effectiveName}। आं नोंथांनि लोगोआवनो दं। नोंथाङा गावनि नख’राव गाहाम दं।`,
+      mni: `ঐহাক্না অদোমগী ৱাফম খঙলে, ${effectiveName}। ঐহাক মতম পুম্বদা অদোমগা লোয়ননা লৈরি। অদোম অপাম্বদা লৈরি।`,
+      lus: `I thu sawi ka hria e, ${effectiveName}. I kiangah ka awm reng a nia. Hahdam deuh khan awm rawh aw.`,
+      kha: `Nga sngewthuh ia phi, ${effectiveName}. Nga don ryngkat bad phi barabor. Phi long kaba shngain ha la iing.`,
+      grt: `Anga nang·ni aganako kni·a, ${effectiveName}. Anga nang· baksa donga. Nang· nokode kema nama donga.`,
+      trp: `Ang nini kok khnaui tong, ${effectiveName}. Ang nini logote tong. Nini nogo nwng bwrwi thungba kaham tong.`,
+      nag: `Moi apuni kotha buji pailo, ${effectiveName}. Moi apuni lagot asey. Kiba chinta nakoribo, sob bhal asey.`,
+      ne: `मैले हजुरको कुरा बुझें, ${effectiveName} हजुर। म सधैं हजुरको साथमा छु। हजुर आफ्नै घरमा सुरक्षित हुनुहुन्छ।`,
+      hi: `मैं आपकी बात समझ रही हूँ, ${effectiveName} जी। मैं हर पल आपके साथ हूँ। आप अपने घर में सुरक्षित हैं और सब बहुत अच्छा चल रहा है।`,
+      en: `I hear you warmly, ${effectiveName}. I am right here by your side. You are completely safe at home, and everything is taken care of.`,
+    };
+    reply = fallbackReplies[languageCode] || fallbackReplies.en;
+  }
 
   return res.json({
     reply,
