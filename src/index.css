@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Lora', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: #173C36;
+    background: #FFFBEF;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-serif);
+  }
+}
+
+/* Custom smooth transitions and scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(23, 60, 54, 0.15);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(23, 60, 54, 0.3);
+}
+
+/* UNO Card Game Animations */
+@keyframes dealIn {
+  from {
+    transform: translateY(-80px) scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes popIn {
+  from {
+    transform: scale(0.6) rotate(-8deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes flyToDiscard {
+  0% {
+    transform: translate(-30px, 80px) scale(0.85) rotate(-12deg);
+    opacity: 0.7;
+  }
+  60% {
+    transform: translate(0px, -15px) scale(1.08) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes flyToHand {
+  0% {
+    transform: translate(0px, -40px) scale(0.8);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate(0px, 70px) scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-deal-in {
+  animation: dealIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-pop-in {
+  animation: popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-fly-to-discard {
+  animation: flyToDiscard 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fly-to-hand {
+  animation: flyToHand 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes playablePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 4px #F5C242, 0 10px 22px rgba(245, 194, 66, 0.65);
+  }
+  50% {
+    box-shadow: 0 0 0 6px #FFE17D, 0 14px 30px rgba(245, 194, 66, 0.9);
+  }
+}
+
+.animate-playable-glow {
+  animation: playablePulse 1.6s ease-in-out infinite;
+}

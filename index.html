@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function() {
+        // 1. Intercept and prevent uncaught errors for fetch getter assignment from bubbling
+        if (typeof window !== 'undefined') {
+          window.addEventListener('error', function(e) {
+            if (e && e.message && typeof e.message === 'string' && e.message.indexOf('fetch') !== -1 && e.message.indexOf('getter') !== -1) {
+              if (e.preventDefault) e.preventDefault();
+              if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+              return true;
+            }
+          }, true);
+
+          var prevOnError = window.onerror;
+          window.onerror = function(msg) {
+            if (typeof msg === 'string' && msg.indexOf('fetch') !== -1 && msg.indexOf('getter') !== -1) {
+              return true;
+            }
+            if (typeof prevOnError === 'function') {
+              return prevOnError.apply(this, arguments);
+            }
+          };
+        }
+
+        // 2. Ensure every level of the window prototype chain has a valid fetch setter and getter
+        try {
+          var realFetch = window.fetch;
+          var activeFetch = typeof realFetch === 'function' ? realFetch.bind(window) : realFetch;
+
+          var descriptor = {
+            get: function() {
+              return activeFetch;
+            },
+            set: function(fn) {
+              activeFetch = fn;
+            },
+            configurable: true,
+            enumerable: true
+          };
+
+          var curr = window;
+          while (curr) {
+            try {
+              var d = Object.getOwnPropertyDescriptor(curr, 'fetch');
+              if (d) {
+                if (d.configurable) {
+                  try {
+                    delete curr.fetch;
+                  } catch (_) {}
+                }
+                try {
+                  Object.defineProperty(curr, 'fetch', descriptor);
+                } catch (_) {}
+              }
+            } catch (_) {}
+            try {
+              curr = Object.getPrototypeOf(curr);
+            } catch (_) {
+              curr = null;
+            }
+          }
+
+          if (typeof Window !== 'undefined' && Window.prototype) {
+            try {
+              Object.defineProperty(Window.prototype, 'fetch', descriptor);
+            } catch (_) {}
+          }
+
+          try {
+            Object.defineProperty(window, 'fetch', descriptor);
+          } catch (_) {}
+        } catch (_) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smriti</title>
+    <meta name="description" content="Cognitive care and memory companion for older adults, featuring gentle brain games, memory lane, voice reminders, stories, and caregiver circle." />
+    <meta property="og:title" content="Smriti" />
+    <meta property="og:description" content="Cognitive care and memory companion for older adults, featuring gentle brain games, memory lane, voice reminders, stories, and caregiver circle." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#FFFBEF] text-[#173C36] antialiased selection:bg-[#F5C244]/30 selection:text-[#173C36]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,6 @@
+{
+  "name": "Smriti",
+  "description": "Cognitive care and memory companion for older adults, featuring gentle brain games, memory lane, voice reminders, stories, and caregiver circle.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
